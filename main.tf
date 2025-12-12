@@ -19,13 +19,13 @@ resource "aws_instance" "app_server" {
 
   # Fix 1: Enforce IMDSv2
   metadata_options {
-    http_tokens   = "required"  # Require session tokens
+    http_tokens   = "required" # Require session tokens
     http_endpoint = "enabled"
   }
 
   # Fix 2: Encrypt root block device
   root_block_device {
-    encrypted = true
+    encrypted   = true
     volume_type = "gp3"
   }
 
