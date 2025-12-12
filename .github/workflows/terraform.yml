@@ -1,49 +1,4 @@
-# This workflow installs the latest version of Terraform CLI and configures the Terraform CLI configuration file
-# with an API token for Terraform Cloud (app.terraform.io). On pull request events, this workflow will run
-# `terraform init`, `terraform fmt`, and `terraform plan` (speculative plan via Terraform Cloud). On push events
-# to the "master" branch, `terraform apply` will be executed.
-#
-# Documentation for `hashicorp/setup-terraform` is located here: https://github.com/hashicorp/setup-terraform
-#
-# To use this workflow, you will need to complete the following setup steps.
-#
-# 1. Create a `main.tf` file in the root of this repository with the `remote` backend and one or more resources defined.
-#   Example `main.tf`:
-#     # The configuration for the `remote` backend.
-#     terraform {
-#       backend "remote" {
-#         # The name of your Terraform Cloud organization.
-#         organization = "example-organization"
-#
-#         # The name of the Terraform Cloud workspace to store Terraform state files in.
-#         workspaces {
-#           name = "example-workspace"
-#         }
-#       }
-#     }
-#
-#     # An example resource that does nothing.
-#     resource "null_resource" "example" {
-#       triggers = {
-#         value = "A example resource that does nothing!"
-#       }
-#     }
-#
-#
-# 2. Generate a Terraform Cloud user API token and store it as a GitHub secret (e.g. TF_API_TOKEN) on this repository.
-#   Documentation:
-#     - https://www.terraform.io/docs/cloud/users-teams-organizations/api-tokens.html
-#     - https://help.github.com/en/actions/configuring-and-managing-workflows/creating-and-storing-encrypted-secrets
-#
-# 3. Reference the GitHub secret in step using the `hashicorp/setup-terraform` GitHub Action.
-#   Example:
-#     - name: Setup Terraform
-#       uses: hashicorp/setup-terraform@v1
-#       with:
-#         cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
-
 name: 'Terraform'
-
 on:
   push:
     branches: [ "master" ]
@@ -52,24 +7,21 @@ on:
 permissions:
   contents: read
   security-events: write
-  
+
 jobs:
   terraform:
     name: 'Terraform'
     runs-on: ubuntu-latest
     environment: production
-
-    # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:
       run:
         shell: bash
-
+    
     steps:
-    # Checkout the repository to the GitHub Actions runner
     - name: Checkout
       uses: actions/checkout@v4
 
-    # Terraform Linting with TFLint
+    # Terraform Linting
     - name: Setup TFLint
       uses: terraform-linters/setup-tflint@v4
       with:
@@ -80,32 +32,24 @@ jobs:
 
     - name: Run TFLint
       run: tflint -f compact
-      
-    # Install the latest version of Terraform CLI and configure the Terraform CLI configuration file with a Terraform Cloud user API token
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: eu-west-1
 
-    # Initialize a new or existing Terraform working directory by creating initial files, loading any remote state, downloading modules, etc.
+    # Setup Terraform with Cloud credentials
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        cli_config_credentials_token: ${{ secrets.TF_CLOUD_API_KEY }}
+
     - name: Terraform Init
       run: terraform init
 
     - name: Terraform Validate
       run: terraform validate
 
-    # Checks that all Terraform configuration files adhere to a canonical format
-    - name: Terraform Format
+    - name: Terraform Format Check
       run: terraform fmt -check -recursive
 
-    # Generates an execution plan for Terraform
-    - name: Terraform Plan
-      run: terraform plan -input=false
-      
-    # Trivy Security Scanning
-    - name: Run Trivy vulnerability scanner in IaC mode
+    # Trivy Security Scanning (generate report)
+    - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
         scan-type: 'config'
@@ -113,42 +57,29 @@ jobs:
         format: 'sarif'
         output: 'trivy-results.sarif'
         severity: 'CRITICAL,HIGH'
-        exit-code: '1'  # Fail pipeline on findings
+        exit-code: '0'
 
     - name: Upload Trivy results to GitHub Security
       uses: github/codeql-action/upload-sarif@v3
-      if: always()  # Upload even if Trivy fails
+      if: always()
       with:
         sarif_file: 'trivy-results.sarif'
 
-    # Optional: Trivy with table output for PR comments
-    - name: Run Trivy (Table Output)
+    # Trivy check that fails on findings
+    - name: Run Trivy security scan (enforce)
       uses: aquasecurity/trivy-action@master
-      if: github.event_name == 'pull_request'
       with:
         scan-type: 'config'
         scan-ref: '.'
         format: 'table'
+        severity: 'CRITICAL,HIGH'
+        exit-code: '1'
 
     # Terraform Plan
     - name: Terraform Plan
-      run: terraform plan -input=false -out=tfplan
+      run: terraform plan -input=false
 
-    # Optional: Add plan output to PR comments
-    - name: Post Plan to PR
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const fs = require('fs');
-          const plan = fs.readFileSync('tfplan', 'utf8');
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: `#### Terraform Plan 📖\n\`\`\`\n${plan}\n\`\`\``
-          });
-
+    # Terraform Apply
     - name: Terraform Apply
       if: github.ref == 'refs/heads/master' && github.event_name == 'push'
       run: terraform apply -auto-approve -input=false

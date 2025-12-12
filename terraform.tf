@@ -1,4 +1,12 @@
 terraform {
+  cloud {
+    organization = "angelos-test"
+
+    workspaces {
+      name = "aws-tf-test"
+    }
+  }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -8,4 +16,3 @@ terraform {
 
   required_version = ">= 1.2"
 }
-
